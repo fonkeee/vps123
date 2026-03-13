@@ -94,6 +94,10 @@ NIXFIX
 # Source sshx link
 [ -f ~/.sshx_link ] && . ~/.sshx_link
 
+# Disable terminal scroll mode for proper screen scrollback
+bind '"\e[5~": ""' 2>/dev/null   # Disable Page Up for history
+bind '"\e[6~": ""' 2>/dev/null   # Disable Page Down for history
+
 # Auto-display startup info (only once per session, only in interactive shell)
 if [[ $- == *i* ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   export STARTUP_INFO_SHOWN=1
@@ -163,12 +167,43 @@ ZSHRC
 [ -f ~/.sshx_link ] && . ~/.sshx_link
 PROFILE
 
+          # Enhanced screenrc with scrollback support
           cat > ~/.screenrc << 'SCREENRC'
+# Terminal settings
 setenv TMPDIR /tmp
 term xterm-256color
-defscrollback 10000
-shell -$SHELL
 startup_message off
+
+# Scrollback buffer - 50000 lines
+defscrollback 50000
+
+# Enable mouse scrolling and terminal scrollback
+termcapinfo xterm* ti@:te@
+
+# Alternative scrollback for other terminals
+termcapinfo rxvt* ti@:te@
+termcapinfo vt100 dl=5\E[M
+
+# Shell settings
+shell -$SHELL
+
+# Status line
+hardstatus alwayslastline
+hardstatus string '%{= kG}[ %{G}%H %{g}][%= %{= kw}%?%-Lw%?%{r}(%{W}%n*%f%t%?(%u)%?%{r})%{w}%?%+Lw%?%?%= %{g}][%{B} %m-%d %{W}%c %{g}]'
+
+# Key bindings for scrollback
+# Enter copy/scrollback mode with Ctrl+A then Escape
+# Then use Page Up/Down, arrow keys, or mouse wheel to scroll
+# Press Escape or q to exit scrollback mode
+
+# Enable UTF-8
+defutf8 on
+
+# Visual bell instead of audio
+vbell on
+
+# Don't block when a window hangs
+nonblock on
 SCREENRC
 
           export TMPDIR=/tmp
@@ -253,6 +288,12 @@ Commands:
   Get sshx link:       echo \$SSHX_LINK
                        get_sshx_link
                        cat ~/.sshx_link
+
+SCROLL IN SCREEN:
+  Ctrl+A then Escape   - Enter scrollback mode
+  Page Up/Down         - Scroll through history
+  Arrow keys           - Navigate
+  Escape or q          - Exit scrollback mode
 
 ==========================================
 INFOEND
@@ -453,6 +494,12 @@ Commands:
   Get sshx link:       echo \$SSHX_LINK
                        get_sshx_link
                        cat ~/.sshx_link
+
+SCROLL IN SCREEN:
+  Ctrl+A then Escape   - Enter scrollback mode
+  Page Up/Down         - Scroll through history
+  Arrow keys           - Navigate
+  Escape or q          - Exit scrollback mode
 
 NOTE: All scripts auto-restart after 3 seconds if they exit.
       Ctrl+C restarts the script, NOT the screen session.
