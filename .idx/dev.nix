@@ -7,7 +7,7 @@
     cloud-utils
     qemu_kvm
     qemu
-    tmate
+    upterm
     tmux
     openssh
     unzip
@@ -79,18 +79,27 @@ fi
 
 [ -n "$TMUX" ] && export SHELL="''${SHELL:-/bin/bash}"
 
-[ -f ~/.tmate_link ] && . ~/.tmate_link
+[ -f ~/.upterm_link ] && . ~/.upterm_link
 
 true
 NIXFIX
+
+          # Generate SSH keys if they don't exist (required by upterm)
+          if [ ! -f ~/.ssh/id_ed25519 ]; then
+            mkdir -p ~/.ssh
+            ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q
+          fi
+          if [ ! -f ~/.ssh/known_hosts ]; then
+            ssh-keyscan -H uptermd.upterm.dev >> ~/.ssh/known_hosts 2>/dev/null || true
+          fi
 
           # Create bashrc with auto-display of startup info
           cat > ~/.bashrc << 'BASHRC'
 # Source shell fixes
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
 
-# Source tmate link
-[ -f ~/.tmate_link ] && . ~/.tmate_link
+# Source upterm link
+[ -f ~/.upterm_link ] && . ~/.upterm_link
 
 # Auto-display startup info (only once per session, only in interactive shell)
 if [[ $- == *i* ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
@@ -106,22 +115,21 @@ if [[ $- == *i* ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   # Show the info
   if [ -f /tmp/startup_info ]; then
     cat /tmp/startup_info
-    # Reload tmate link in case it was updated
-    [ -f ~/.tmate_link ] && . ~/.tmate_link
+    [ -f ~/.upterm_link ] && . ~/.upterm_link
   fi
   unset _wait_count
 fi
 
-# Function to get current tmate links
-get_tmate_link() {
-  if [ -f ~/.tmate_link ]; then
-    . ~/.tmate_link
+# Function to get current upterm links
+get_upterm_link() {
+  if [ -f ~/.upterm_link ]; then
+    . ~/.upterm_link
     echo ""
-    echo "  Connect via terminal:  $TMATE_SSH"
-    echo "  Connect via browser:   $TMATE_WEB"
+    echo "  Connect via terminal:  $UPTERM_SSH"
+    echo "  Connect via websocket: $UPTERM_WSS"
     echo ""
   else
-    echo "No tmate link available yet"
+    echo "No upterm link available yet"
   fi
 }
 BASHRC
@@ -129,7 +137,7 @@ BASHRC
           # Also set up zshrc and profile
           cat > ~/.zshrc << 'ZSHRC'
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
-[ -f ~/.tmate_link ] && . ~/.tmate_link
+[ -f ~/.upterm_link ] && . ~/.upterm_link
 
 if [[ -o interactive ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   export STARTUP_INFO_SHOWN=1
@@ -140,33 +148,34 @@ if [[ -o interactive ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   done
   if [ -f /tmp/startup_info ]; then
     cat /tmp/startup_info
-    [ -f ~/.tmate_link ] && . ~/.tmate_link
+    [ -f ~/.upterm_link ] && . ~/.upterm_link
   fi
   unset _wait_count
 fi
 
-get_tmate_link() {
-  if [ -f ~/.tmate_link ]; then
-    . ~/.tmate_link
+get_upterm_link() {
+  if [ -f ~/.upterm_link ]; then
+    . ~/.upterm_link
     echo ""
-    echo "  Connect via terminal:  $TMATE_SSH"
-    echo "  Connect via browser:   $TMATE_WEB"
+    echo "  Connect via terminal:  $UPTERM_SSH"
+    echo "  Connect via websocket: $UPTERM_WSS"
     echo ""
   else
-    echo "No tmate link available yet"
+    echo "No upterm link available yet"
   fi
 }
 ZSHRC
 
           cat > ~/.profile << 'PROFILE'
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
-[ -f ~/.tmate_link ] && . ~/.tmate_link
+[ -f ~/.upterm_link ] && . ~/.upterm_link
 PROFILE
 
           cat > ~/.tmux.conf << 'TMUXCONF'
 set-option -g default-terminal "xterm-256color"
 set-option -g history-limit 10000
 set-option -g default-shell /bin/bash
+set-option -g update-environment "UPTERM_ADMIN_SOCKET"
 TMUXCONF
 
           export TMPDIR=/tmp
@@ -175,7 +184,7 @@ TMUXCONF
           sleep 1
 
           # Clear old files
-          rm -f /tmp/tmate_link /tmp/tmate.sock /tmp/startup_info /tmp/startup_complete
+          rm -f /tmp/upterm_output /tmp/startup_info /tmp/startup_complete
 
           # Create tmux session starter scripts
           cat > /tmp/start_stayawake.sh << 'STAYAWAKE_SCRIPT'
@@ -218,22 +227,18 @@ done
 STAYAWAKE_SCRIPT
           chmod +x /tmp/start_stayawake.sh
 
-          cat > /tmp/start_tmate.sh << 'TMATE_SCRIPT'
+          cat > /tmp/start_upterm.sh << 'UPTERM_SCRIPT'
 #!/bin/bash
 source ~/.shell-fixes 2>/dev/null
 RESTART_COUNT=0
 
-update_tmate_link() {
-  local web="$1"
-  local ssh="$2"
-  local web_ro="$3"
-  local ssh_ro="$4"
+update_upterm_link() {
+  local ssh_cmd="$1"
+  local wss_cmd="$2"
 
-  cat > ~/.tmate_link << LINKEND
-export TMATE_WEB="$web"
-export TMATE_SSH="$ssh"
-export TMATE_WEB_RO="$web_ro"
-export TMATE_SSH_RO="$ssh_ro"
+  cat > ~/.upterm_link << LINKEND
+export UPTERM_SSH="$ssh_cmd"
+export UPTERM_WSS="$wss_cmd"
 LINKEND
   
   cat > /tmp/startup_info << INFOEND
@@ -242,11 +247,11 @@ LINKEND
         STARTUP COMPLETE
 ==========================================
 
-  Connect via terminal:
-    $ssh
+  Connect via terminal (SSH):
+    $ssh_cmd
 
-  Connect via browser:
-    $web
+  Connect via terminal (WebSocket):
+    $wss_cmd
 
   (Updated at: $(date))
 
@@ -256,17 +261,17 @@ tmux Sessions:
 $(tmux list-sessions 2>/dev/null || echo "  Loading...")
 
 Commands:
-  tmux attach -t stayawake  - View keep-alive script
-  tmux attach -t tmate_mgr  - View tmate manager
-  tmux attach -t VPS        - View VPS/idxtool session
-  tmux attach -t watchdog   - View session watchdog
+  tmux attach -t stayawake   - View keep-alive script
+  tmux attach -t upterm_mgr  - View upterm manager
+  tmux attach -t VPS         - View VPS/idxtool session
+  tmux attach -t watchdog    - View session watchdog
   
   Detach from tmux:    Ctrl+B then D
   Restart script:      Ctrl+C (script restarts, tmux stays)
-  Get tmate links:     get_tmate_link
+  Get upterm links:    get_upterm_link
 
 NOTE: All scripts auto-restart after 3 seconds if they exit.
-      If tmate restarts, NEW links will be generated.
+      If upterm restarts, NEW links will be generated.
       WATCHDOG monitors sessions every 10 seconds and
       auto-restarts any dead tmux sessions.
 
@@ -278,58 +283,73 @@ while true; do
   RESTART_COUNT=$((RESTART_COUNT + 1))
   echo ""
   echo "=========================================="
-  echo "  TMATE SESSION - Run #$RESTART_COUNT"
+  echo "  UPTERM SESSION - Run #$RESTART_COUNT"
   echo "  Started at: $(date)"
   echo "  Press Ctrl+C to restart"
   echo "  Press Ctrl+B then D to detach"
   echo "=========================================="
   echo ""
   
-  rm -f /tmp/tmate.sock
+  rm -f /tmp/upterm_output
 
-  # Start tmate in detached mode with a named socket
-  tmate -S /tmp/tmate.sock new-session -d
-  
-  # Wait for tmate to be ready
-  tmate -S /tmp/tmate.sock wait tmate-ready
+  # Start upterm host in background
+  upterm host --server ssh://uptermd.upterm.dev -- bash &
+  UPTERM_PID=$!
 
-  # Capture all 4 links
-  TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
-  TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-  TMATE_WEB_RO=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web_ro}')
-  TMATE_SSH_RO=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh_ro}')
+  # Wait for upterm to be ready, then capture session info
+  LINK_FOUND=0
+  for i in $(seq 1 30); do
+    if ! kill -0 $UPTERM_PID 2>/dev/null; then
+      break
+    fi
 
-  if [ -n "$TMATE_WEB" ]; then
-    update_tmate_link "$TMATE_WEB" "$TMATE_SSH" "$TMATE_WEB_RO" "$TMATE_SSH_RO"
-    echo ""
-    echo "=========================================="
-    echo "  TMATE LINKS CAPTURED!"
-    echo ""
-    echo "  Connect via terminal:"
-    echo "    $TMATE_SSH"
-    echo ""
-    echo "  Connect via browser:"
-    echo "    $TMATE_WEB"
-    echo "=========================================="
-    echo ""
-  else
-    echo "WARNING: Could not capture tmate links"
+    # Try to get session info
+    SESSION_INFO=$(upterm session current 2>/dev/null)
+    if [ -n "$SESSION_INFO" ]; then
+      UPTERM_SSH=$(echo "$SESSION_INFO" | grep "SSH Session:" | sed 's/.*SSH Session: *//')
+      # Build WebSocket connect command
+      UPTERM_HOST=$(echo "$UPTERM_SSH" | grep -oP '(?<=@)[^:]+')
+      UPTERM_TOKEN=$(echo "$UPTERM_SSH" | grep -oP 'ssh [^ ]+' | sed 's/ssh //')
+      UPTERM_WSS="ssh -o ProxyCommand='upterm proxy wss://''${UPTERM_TOKEN}@''${UPTERM_HOST}' ''${UPTERM_TOKEN}@''${UPTERM_HOST}:443"
+
+      if [ -n "$UPTERM_SSH" ]; then
+        update_upterm_link "$UPTERM_SSH" "$UPTERM_WSS"
+        echo ""
+        echo "=========================================="
+        echo "  UPTERM LINKS CAPTURED!"
+        echo ""
+        echo "  Connect via terminal (SSH):"
+        echo "    $UPTERM_SSH"
+        echo ""
+        echo "  Connect via terminal (WebSocket):"
+        echo "    $UPTERM_WSS"
+        echo "=========================================="
+        echo ""
+        LINK_FOUND=1
+        break
+      fi
+    fi
+    sleep 1
+  done
+
+  if [ $LINK_FOUND -eq 0 ]; then
+    echo "WARNING: Could not capture upterm links within 30 seconds"
   fi
 
-  # Wait for the tmate session to end
-  tmate -S /tmp/tmate.sock wait tmate-session-deactivated 2>/dev/null
+  # Wait for upterm to exit
+  wait $UPTERM_PID 2>/dev/null
   EXIT_CODE=$?
 
   echo ""
   echo "=========================================="
-  echo "  tmate session ended (code: $EXIT_CODE)"
+  echo "  upterm session ended (code: $EXIT_CODE)"
   echo "  Restarting in 3 seconds..."
   echo "  NEW LINKS will be generated!"
   echo "=========================================="
   sleep 3
 done
-TMATE_SCRIPT
-          chmod +x /tmp/start_tmate.sh
+UPTERM_SCRIPT
+          chmod +x /tmp/start_upterm.sh
 
           cat > /tmp/start_vps.sh << 'VPS_SCRIPT'
 #!/bin/bash
@@ -379,7 +399,7 @@ source ~/.shell-fixes 2>/dev/null
 echo "=========================================="
 echo "  TMUX SESSION WATCHDOG"
 echo "  Started at: $(date)"
-echo "  Monitoring: stayawake, tmate_mgr, VPS"
+echo "  Monitoring: stayawake, upterm_mgr, VPS"
 echo "  Check interval: 10 seconds"
 echo "=========================================="
 echo ""
@@ -402,7 +422,7 @@ check_and_start_session() {
 
 while true; do
   check_and_start_session "stayawake" "/tmp/start_stayawake.sh"
-  check_and_start_session "tmate_mgr" "/tmp/start_tmate.sh"
+  check_and_start_session "upterm_mgr" "/tmp/start_upterm.sh"
   check_and_start_session "VPS" "/tmp/start_vps.sh"
   
   sleep 10
@@ -413,37 +433,37 @@ WATCHDOG_SCRIPT
           # 1. Start stayawake session
           tmux new-session -d -s stayawake "bash /tmp/start_stayawake.sh"
 
-          # 2. Start tmate manager session
-          tmux new-session -d -s tmate_mgr "bash /tmp/start_tmate.sh"
+          # 2. Start upterm manager session
+          tmux new-session -d -s upterm_mgr "bash /tmp/start_upterm.sh"
 
           # 3. Start VPS session
           tmux new-session -d -s VPS "bash /tmp/start_vps.sh"
 
-          # 4. Start watchdog session (monitors and restarts other sessions)
+          # 4. Start watchdog session
           tmux new-session -d -s watchdog "bash /tmp/watchdog.sh"
 
-          # Wait for tmate links
+          # Wait for upterm links
           for i in $(seq 1 60); do
-            if [ -f ~/.tmate_link ]; then
-              . ~/.tmate_link
+            if [ -f ~/.upterm_link ]; then
+              . ~/.upterm_link
               break
             fi
             sleep 1
           done
 
           # Build startup info file
-          [ -f ~/.tmate_link ] && . ~/.tmate_link
+          [ -f ~/.upterm_link ] && . ~/.upterm_link
           cat > /tmp/startup_info << INFOEND
 
 ==========================================
         STARTUP COMPLETE
 ==========================================
 
-  Connect via terminal:
-    ''${TMATE_SSH:-"Loading... run: get_tmate_link"}
+  Connect via terminal (SSH):
+    ''${UPTERM_SSH:-"Loading... run: get_upterm_link"}
 
-  Connect via browser:
-    ''${TMATE_WEB:-"Loading... run: get_tmate_link"}
+  Connect via terminal (WebSocket):
+    ''${UPTERM_WSS:-"Loading... run: get_upterm_link"}
 
 ------------------------------------------
 
@@ -451,17 +471,17 @@ tmux Sessions:
 $(tmux list-sessions 2>/dev/null || echo "  Loading...")
 
 Commands:
-  tmux attach -t stayawake  - View keep-alive script
-  tmux attach -t tmate_mgr  - View tmate manager
-  tmux attach -t VPS        - View VPS/idxtool session
-  tmux attach -t watchdog   - View session watchdog
+  tmux attach -t stayawake   - View keep-alive script
+  tmux attach -t upterm_mgr  - View upterm manager
+  tmux attach -t VPS         - View VPS/idxtool session
+  tmux attach -t watchdog    - View session watchdog
   
   Detach from tmux:    Ctrl+B then D
   Restart script:      Ctrl+C (script restarts, tmux stays)
-  Get tmate links:     get_tmate_link
+  Get upterm links:    get_upterm_link
 
 NOTE: All scripts auto-restart after 3 seconds if they exit.
-      If tmate restarts, NEW links will be generated.
+      If upterm restarts, NEW links will be generated.
       WATCHDOG monitors sessions every 10 seconds and
       auto-restarts any dead tmux sessions.
 
