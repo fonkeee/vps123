@@ -7,8 +7,8 @@
     cloud-utils
     qemu_kvm
     qemu
-    upterm
-    tmux
+    sshx
+    screen
     openssh
     unzip
     git
@@ -26,8 +26,10 @@
     workspace = {
       onStart = {
         startup = ''
-          # Clean up tmux first
-          tmux kill-server 2>/dev/null || true
+          # Clean up screens first
+          screen -wipe 2>/dev/null || true
+          killall screen 2>/dev/null || true
+          screen -wipe 2>/dev/null || true
 
           # Create shell-fixes
           cat > ~/.shell-fixes << 'NIXFIX'
@@ -77,59 +79,50 @@ fi
 
 [ ! -d "''${HOME:-}" ] && export HOME=$(eval echo "~$(whoami)")
 
-[ -n "$TMUX" ] && export SHELL="''${SHELL:-/bin/bash}"
+[ -n "$STY" ] && export SHELL="''${SHELL:-/bin/bash}"
 
-[ -f ~/.upterm_link ] && . ~/.upterm_link
+[ -f ~/.sshx_link ] && . ~/.sshx_link
 
 true
 NIXFIX
-
-          # Generate SSH keys if they don't exist (required by upterm)
-          if [ ! -f ~/.ssh/id_ed25519 ]; then
-            mkdir -p ~/.ssh
-            ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N "" -q
-          fi
-          if [ ! -f ~/.ssh/known_hosts ]; then
-            ssh-keyscan -H uptermd.upterm.dev >> ~/.ssh/known_hosts 2>/dev/null || true
-          fi
 
           # Create bashrc with auto-display of startup info
           cat > ~/.bashrc << 'BASHRC'
 # Source shell fixes
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
 
-# Source upterm link
-[ -f ~/.upterm_link ] && . ~/.upterm_link
+# Source sshx link
+[ -f ~/.sshx_link ] && . ~/.sshx_link
 
 # Auto-display startup info (only once per session, only in interactive shell)
 if [[ $- == *i* ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   export STARTUP_INFO_SHOWN=1
-  
+
   # Wait for startup to complete (max 90 seconds)
   _wait_count=0
   while [ ! -f /tmp/startup_complete ] && [ $_wait_count -lt 90 ]; do
     sleep 1
     _wait_count=$((_wait_count + 1))
   done
-  
+
   # Show the info
   if [ -f /tmp/startup_info ]; then
     cat /tmp/startup_info
-    [ -f ~/.upterm_link ] && . ~/.upterm_link
+    # Reload sshx link in case it was updated
+    [ -f ~/.sshx_link ] && . ~/.sshx_link
   fi
   unset _wait_count
 fi
 
-# Function to get current upterm links
-get_upterm_link() {
-  if [ -f ~/.upterm_link ]; then
-    . ~/.upterm_link
-    echo ""
-    echo "  Connect via terminal:  $UPTERM_SSH"
-    echo "  Connect via websocket: $UPTERM_WSS"
-    echo ""
+# Function to get current sshx link
+get_sshx_link() {
+  if [ -f ~/.sshx_link ]; then
+    . ~/.sshx_link
+    echo "$SSHX_LINK"
+  elif [ -f /tmp/sshx_link ]; then
+    cat /tmp/sshx_link
   else
-    echo "No upterm link available yet"
+    echo "No sshx link available yet"
   fi
 }
 BASHRC
@@ -137,7 +130,7 @@ BASHRC
           # Also set up zshrc and profile
           cat > ~/.zshrc << 'ZSHRC'
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
-[ -f ~/.upterm_link ] && . ~/.upterm_link
+[ -f ~/.sshx_link ] && . ~/.sshx_link
 
 if [[ -o interactive ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   export STARTUP_INFO_SHOWN=1
@@ -148,35 +141,35 @@ if [[ -o interactive ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   done
   if [ -f /tmp/startup_info ]; then
     cat /tmp/startup_info
-    [ -f ~/.upterm_link ] && . ~/.upterm_link
+    [ -f ~/.sshx_link ] && . ~/.sshx_link
   fi
   unset _wait_count
 fi
 
-get_upterm_link() {
-  if [ -f ~/.upterm_link ]; then
-    . ~/.upterm_link
-    echo ""
-    echo "  Connect via terminal:  $UPTERM_SSH"
-    echo "  Connect via websocket: $UPTERM_WSS"
-    echo ""
+get_sshx_link() {
+  if [ -f ~/.sshx_link ]; then
+    . ~/.sshx_link
+    echo "$SSHX_LINK"
+  elif [ -f /tmp/sshx_link ]; then
+    cat /tmp/sshx_link
   else
-    echo "No upterm link available yet"
+    echo "No sshx link available yet"
   fi
 }
 ZSHRC
 
           cat > ~/.profile << 'PROFILE'
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
-[ -f ~/.upterm_link ] && . ~/.upterm_link
+[ -f ~/.sshx_link ] && . ~/.sshx_link
 PROFILE
 
-          cat > ~/.tmux.conf << 'TMUXCONF'
-set-option -g default-terminal "xterm-256color"
-set-option -g history-limit 10000
-set-option -g default-shell /bin/bash
-set-option -g update-environment "UPTERM_ADMIN_SOCKET"
-TMUXCONF
+          cat > ~/.screenrc << 'SCREENRC'
+setenv TMPDIR /tmp
+term xterm-256color
+defscrollback 10000
+shell -$SHELL
+startup_message off
+SCREENRC
 
           export TMPDIR=/tmp
           [ -f ~/.shell-fixes ] && . ~/.shell-fixes
@@ -184,9 +177,9 @@ TMUXCONF
           sleep 1
 
           # Clear old files
-          rm -f /tmp/upterm_output /tmp/startup_info /tmp/startup_complete
+          rm -f /tmp/sshx_link /tmp/sshx_output /tmp/startup_info /tmp/startup_complete
 
-          # Create tmux session starter scripts
+          # Create screen session starter scripts
           cat > /tmp/start_stayawake.sh << 'STAYAWAKE_SCRIPT'
 #!/bin/bash
 source ~/.shell-fixes 2>/dev/null
@@ -196,30 +189,30 @@ while true; do
   RESTART_COUNT=$((RESTART_COUNT + 1))
   echo ""
   echo "=========================================="
-  echo "  STAYAWAKE SCRIPT - Run #$RESTART_COUNT"
-  echo "  Started at: $(date)"
-  echo "  Press Ctrl+C to restart script"
-  echo "  Press Ctrl+B then D to detach"
+  echo " STAYAWAKE SCRIPT - Run #$RESTART_COUNT"
+  echo " Started at: $(date)"
+  echo " Press Ctrl+C to restart script"
+  echo " Press Ctrl+A then D to detach"
   echo "=========================================="
   echo ""
-  
+
   (
     trap "exit 130" INT
     python3 <(curl -s https://raw.githubusercontent.com/JishnuTheGamer/24-7/refs/heads/main/24)
   )
   EXIT_CODE=$?
-  
+
   if [ $EXIT_CODE -eq 130 ]; then
     echo ""
     echo "=========================================="
-    echo "  Script interrupted (Ctrl+C)"
-    echo "  Restarting in 3 seconds..."
+    echo " Script interrupted (Ctrl+C)"
+    echo " Restarting in 3 seconds..."
     echo "=========================================="
   else
     echo ""
     echo "=========================================="
-    echo "  Script exited with code: $EXIT_CODE"
-    echo "  Restarting in 3 seconds..."
+    echo " Script exited with code: $EXIT_CODE"
+    echo " Restarting in 3 seconds..."
     echo "=========================================="
   fi
   sleep 3
@@ -227,53 +220,37 @@ done
 STAYAWAKE_SCRIPT
           chmod +x /tmp/start_stayawake.sh
 
-          cat > /tmp/start_upterm.sh << 'UPTERM_SCRIPT'
+          cat > /tmp/start_sshx.sh << 'SSHX_SCRIPT'
 #!/bin/bash
 source ~/.shell-fixes 2>/dev/null
 RESTART_COUNT=0
 
-update_upterm_link() {
-  local ssh_cmd="$1"
-  local wss_cmd="$2"
+update_sshx_link() {
+  local new_link="$1"
+  echo "$new_link" > /tmp/sshx_link
+  echo "export SSHX_LINK=\"$new_link\"" > ~/.sshx_link
 
-  cat > ~/.upterm_link << LINKEND
-export UPTERM_SSH="$ssh_cmd"
-export UPTERM_WSS="$wss_cmd"
-LINKEND
-  
   cat > /tmp/startup_info << INFOEND
 
 ==========================================
-        STARTUP COMPLETE
-==========================================
+STARTUP COMPLETE
+SSHX Link: $new_link
+(Updated at: $(date))
 
-  Connect via terminal (SSH):
-    $ssh_cmd
-
-  Connect via terminal (WebSocket):
-    $wss_cmd
-
-  (Updated at: $(date))
-
-------------------------------------------
-
-tmux Sessions:
-$(tmux list-sessions 2>/dev/null || echo "  Loading...")
+Screen Sessions:
+$(screen -ls 2>/dev/null | grep -E "stayawake|sshx|VPS|watchdog" || echo "  Loading...")
 
 Commands:
-  tmux attach -t stayawake   - View keep-alive script
-  tmux attach -t upterm_mgr  - View upterm manager
-  tmux attach -t VPS         - View VPS/idxtool session
-  tmux attach -t watchdog    - View session watchdog
-  
-  Detach from tmux:    Ctrl+B then D
-  Restart script:      Ctrl+C (script restarts, tmux stays)
-  Get upterm links:    get_upterm_link
+  screen -r stayawake  - View keep-alive script
+  screen -r sshx       - View sshx session
+  screen -r VPS        - View VPS/idxtool session
+  screen -r watchdog   - View session watchdog
 
-NOTE: All scripts auto-restart after 3 seconds if they exit.
-      If upterm restarts, NEW links will be generated.
-      WATCHDOG monitors sessions every 10 seconds and
-      auto-restarts any dead tmux sessions.
+Detach from screen: Ctrl+A then D
+Restart script: Ctrl+C (script restarts, screen stays)
+Get sshx link: echo \$SSHX_LINK
+              get_sshx_link
+              cat ~/.sshx_link
 
 ==========================================
 INFOEND
@@ -283,46 +260,34 @@ while true; do
   RESTART_COUNT=$((RESTART_COUNT + 1))
   echo ""
   echo "=========================================="
-  echo "  UPTERM SESSION - Run #$RESTART_COUNT"
-  echo "  Started at: $(date)"
-  echo "  Press Ctrl+C to restart"
-  echo "  Press Ctrl+B then D to detach"
+  echo " SSHX SESSION - Run #$RESTART_COUNT"
+  echo " Started at: $(date)"
+  echo " Press Ctrl+C to restart script"
+  echo " Press Ctrl+A then D to detach"
   echo "=========================================="
   echo ""
-  
-  rm -f /tmp/upterm_output
 
-  # Start upterm host in background
-  upterm host --server ssh://uptermd.upterm.dev -- bash &
-  UPTERM_PID=$!
+  rm -f /tmp/sshx_output
 
-  # Wait for upterm to be ready, then capture session info
+  (
+    trap "exit 130" INT
+    sshx 2>&1 | tee /tmp/sshx_output
+  ) &
+  SSHX_PID=$!
+
   LINK_FOUND=0
   for i in $(seq 1 30); do
-    if ! kill -0 $UPTERM_PID 2>/dev/null; then
+    if ! kill -0 $SSHX_PID 2>/dev/null; then
       break
     fi
-
-    # Try to get session info
-    SESSION_INFO=$(upterm session current 2>/dev/null)
-    if [ -n "$SESSION_INFO" ]; then
-      UPTERM_SSH=$(echo "$SESSION_INFO" | grep "SSH Session:" | sed 's/.*SSH Session: *//')
-      # Build WebSocket connect command
-      UPTERM_HOST=$(echo "$UPTERM_SSH" | grep -oP '(?<=@)[^:]+')
-      UPTERM_TOKEN=$(echo "$UPTERM_SSH" | grep -oP 'ssh [^ ]+' | sed 's/ssh //')
-      UPTERM_WSS="ssh -o ProxyCommand='upterm proxy wss://''${UPTERM_TOKEN}@''${UPTERM_HOST}' ''${UPTERM_TOKEN}@''${UPTERM_HOST}:443"
-
-      if [ -n "$UPTERM_SSH" ]; then
-        update_upterm_link "$UPTERM_SSH" "$UPTERM_WSS"
+    if grep -o "https://sshx.io/s/[^#]*#[^ ]*" /tmp/sshx_output > /tmp/sshx_link_new 2>/dev/null; then
+      NEW_LINK=$(cat /tmp/sshx_link_new | head -1)
+      if [ -n "$NEW_LINK" ]; then
+        update_sshx_link "$NEW_LINK"
         echo ""
         echo "=========================================="
-        echo "  UPTERM LINKS CAPTURED!"
-        echo ""
-        echo "  Connect via terminal (SSH):"
-        echo "    $UPTERM_SSH"
-        echo ""
-        echo "  Connect via terminal (WebSocket):"
-        echo "    $UPTERM_WSS"
+        echo " NEW SSHX LINK CAPTURED!"
+        echo " $NEW_LINK"
         echo "=========================================="
         echo ""
         LINK_FOUND=1
@@ -333,23 +298,31 @@ while true; do
   done
 
   if [ $LINK_FOUND -eq 0 ]; then
-    echo "WARNING: Could not capture upterm links within 30 seconds"
+    echo "WARNING: Could not capture sshx link within 30 seconds"
   fi
 
-  # Wait for upterm to exit
-  wait $UPTERM_PID 2>/dev/null
+  wait $SSHX_PID 2>/dev/null
   EXIT_CODE=$?
 
-  echo ""
-  echo "=========================================="
-  echo "  upterm session ended (code: $EXIT_CODE)"
-  echo "  Restarting in 3 seconds..."
-  echo "  NEW LINKS will be generated!"
-  echo "=========================================="
+  if [ $EXIT_CODE -eq 130 ]; then
+    echo ""
+    echo "=========================================="
+    echo " sshx interrupted (Ctrl+C)"
+    echo " Restarting in 3 seconds..."
+    echo " A NEW LINK will be generated!"
+    echo "=========================================="
+  else
+    echo ""
+    echo "=========================================="
+    echo " sshx exited with code: $EXIT_CODE"
+    echo " Restarting in 3 seconds..."
+    echo " A NEW LINK will be generated!"
+    echo "=========================================="
+  fi
   sleep 3
 done
-UPTERM_SCRIPT
-          chmod +x /tmp/start_upterm.sh
+SSHX_SCRIPT
+          chmod +x /tmp/start_sshx.sh
 
           cat > /tmp/start_vps.sh << 'VPS_SCRIPT'
 #!/bin/bash
@@ -360,30 +333,30 @@ while true; do
   RESTART_COUNT=$((RESTART_COUNT + 1))
   echo ""
   echo "=========================================="
-  echo "  VPS/IDXTOOL SCRIPT - Run #$RESTART_COUNT"
-  echo "  Started at: $(date)"
-  echo "  Press Ctrl+C to restart script"
-  echo "  Press Ctrl+B then D to detach"
+  echo " VPS/IDXTOOL SCRIPT - Run #$RESTART_COUNT"
+  echo " Started at: $(date)"
+  echo " Press Ctrl+C to restart script"
+  echo " Press Ctrl+A then D to detach"
   echo "=========================================="
   echo ""
-  
+
   (
     trap "exit 130" INT
     bash <(curl -s https://raw.githubusercontent.com/fonkeee/firebase-studio/refs/heads/main/idxtool.sh)
   )
   EXIT_CODE=$?
-  
+
   if [ $EXIT_CODE -eq 130 ]; then
     echo ""
     echo "=========================================="
-    echo "  Script interrupted (Ctrl+C)"
-    echo "  Restarting in 3 seconds..."
+    echo " Script interrupted (Ctrl+C)"
+    echo " Restarting in 3 seconds..."
     echo "=========================================="
   else
     echo ""
     echo "=========================================="
-    echo "  Script exited with code: $EXIT_CODE"
-    echo "  Restarting in 3 seconds..."
+    echo " Script exited with code: $EXIT_CODE"
+    echo " Restarting in 3 seconds..."
     echo "=========================================="
   fi
   sleep 3
@@ -397,22 +370,22 @@ VPS_SCRIPT
 source ~/.shell-fixes 2>/dev/null
 
 echo "=========================================="
-echo "  TMUX SESSION WATCHDOG"
-echo "  Started at: $(date)"
-echo "  Monitoring: stayawake, upterm_mgr, VPS"
-echo "  Check interval: 10 seconds"
+echo " SCREEN SESSION WATCHDOG"
+echo " Started at: $(date)"
+echo " Monitoring: stayawake, sshx, VPS"
+echo " Check interval: 10 seconds"
 echo "=========================================="
 echo ""
 
 check_and_start_session() {
   local session_name="$1"
   local script_path="$2"
-  
-  if ! tmux has-session -t "$session_name" 2>/dev/null; then
+
+  if ! screen -ls | grep -q "\.$session_name[[:space:]]"; then
     echo "[$(date '+%H:%M:%S')] Session '$session_name' not found - RESTARTING..."
-    tmux new-session -d -s "$session_name" "bash $script_path"
+    screen -dmS "$session_name" bash "$script_path"
     sleep 2
-    if tmux has-session -t "$session_name" 2>/dev/null; then
+    if screen -ls | grep -q "\.$session_name[[:space:]]"; then
       echo "[$(date '+%H:%M:%S')] Session '$session_name' successfully restarted!"
     else
       echo "[$(date '+%H:%M:%S')] WARNING: Failed to restart '$session_name'"
@@ -422,68 +395,65 @@ check_and_start_session() {
 
 while true; do
   check_and_start_session "stayawake" "/tmp/start_stayawake.sh"
-  check_and_start_session "upterm_mgr" "/tmp/start_upterm.sh"
+  check_and_start_session "sshx" "/tmp/start_sshx.sh"
   check_and_start_session "VPS" "/tmp/start_vps.sh"
-  
+
+  screen -wipe 2>/dev/null || true
+
   sleep 10
 done
 WATCHDOG_SCRIPT
           chmod +x /tmp/watchdog.sh
 
           # 1. Start stayawake session
-          tmux new-session -d -s stayawake "bash /tmp/start_stayawake.sh"
+          screen -dmS stayawake bash /tmp/start_stayawake.sh
 
-          # 2. Start upterm manager session
-          tmux new-session -d -s upterm_mgr "bash /tmp/start_upterm.sh"
+          # 2. Start sshx session
+          screen -dmS sshx bash /tmp/start_sshx.sh
 
           # 3. Start VPS session
-          tmux new-session -d -s VPS "bash /tmp/start_vps.sh"
+          screen -dmS VPS bash /tmp/start_vps.sh
 
-          # 4. Start watchdog session
-          tmux new-session -d -s watchdog "bash /tmp/watchdog.sh"
+          # 4. Start watchdog session (monitors and restarts other sessions)
+          screen -dmS watchdog bash /tmp/watchdog.sh
 
-          # Wait for upterm links
+          # Wait for sshx link
+          SSHX_LINK=""
           for i in $(seq 1 60); do
-            if [ -f ~/.upterm_link ]; then
-              . ~/.upterm_link
+            if [ -s /tmp/sshx_link ]; then
+              SSHX_LINK=$(cat /tmp/sshx_link | head -1)
+              echo "export SSHX_LINK=\"$SSHX_LINK\"" > ~/.sshx_link
               break
             fi
             sleep 1
           done
 
           # Build startup info file
-          [ -f ~/.upterm_link ] && . ~/.upterm_link
           cat > /tmp/startup_info << INFOEND
-
 ==========================================
-        STARTUP COMPLETE
-==========================================
+STARTUP COMPLETE
+SSHX Link: ''${SSHX_LINK:-"Loading... run: cat /tmp/sshx_link"}
 
-  Connect via terminal (SSH):
-    ''${UPTERM_SSH:-"Loading... run: get_upterm_link"}
-
-  Connect via terminal (WebSocket):
-    ''${UPTERM_WSS:-"Loading... run: get_upterm_link"}
-
-------------------------------------------
-
-tmux Sessions:
-$(tmux list-sessions 2>/dev/null || echo "  Loading...")
+Screen Sessions:
+$(screen -ls 2>/dev/null | grep -E "stayawake|sshx|VPS|watchdog" || echo "  Loading...")
 
 Commands:
-  tmux attach -t stayawake   - View keep-alive script
-  tmux attach -t upterm_mgr  - View upterm manager
-  tmux attach -t VPS         - View VPS/idxtool session
-  tmux attach -t watchdog    - View session watchdog
-  
-  Detach from tmux:    Ctrl+B then D
-  Restart script:      Ctrl+C (script restarts, tmux stays)
-  Get upterm links:    get_upterm_link
+  screen -r stayawake  - View keep-alive script
+  screen -r sshx       - View sshx session
+  screen -r VPS        - View VPS/idxtool session
+  screen -r watchdog   - View session watchdog
+
+Detach from screen: Ctrl+A then D
+Restart script: Ctrl+C (script restarts, screen stays)
+Get sshx link: echo \$SSHX_LINK
+              get_sshx_link
+              cat ~/.sshx_link
 
 NOTE: All scripts auto-restart after 3 seconds if they exit.
-      If upterm restarts, NEW links will be generated.
+      Ctrl+C restarts the script, NOT the screen session.
+      If sshx restarts, a NEW link will be generated.
       WATCHDOG monitors sessions every 10 seconds and
-      auto-restarts any dead tmux sessions.
+      auto-restarts any deleted screen sessions.
 
 ==========================================
 INFOEND
