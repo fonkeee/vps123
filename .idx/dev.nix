@@ -7,7 +7,7 @@
     cloud-utils
     qemu_kvm
     qemu
-    sshx
+    upterm
     screen
     openssh
     unzip
@@ -81,7 +81,7 @@ fi
 
 [ -n "$STY" ] && export SHELL="''${SHELL:-/bin/bash}"
 
-[ -f ~/.sshx_link ] && . ~/.sshx_link
+[ -f ~/.upterm_link ] && . ~/.upterm_link
 
 true
 NIXFIX
@@ -91,8 +91,8 @@ NIXFIX
 # Source shell fixes
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
 
-# Source sshx link
-[ -f ~/.sshx_link ] && . ~/.sshx_link
+# Source upterm link
+[ -f ~/.upterm_link ] && . ~/.upterm_link
 
 # Auto-display startup info (only once per session, only in interactive shell)
 if [[ $- == *i* ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
@@ -108,21 +108,23 @@ if [[ $- == *i* ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   # Show the info
   if [ -f /tmp/startup_info ]; then
     cat /tmp/startup_info
-    # Reload sshx link in case it was updated
-    [ -f ~/.sshx_link ] && . ~/.sshx_link
+    # Reload upterm link in case it was updated
+    [ -f ~/.upterm_link ] && . ~/.upterm_link
   fi
   unset _wait_count
 fi
 
-# Function to get current sshx link
-get_sshx_link() {
-  if [ -f ~/.sshx_link ]; then
-    . ~/.sshx_link
-    echo "$SSHX_LINK"
-  elif [ -f /tmp/sshx_link ]; then
-    cat /tmp/sshx_link
+# Function to get current upterm info
+get_upterm_info() {
+  if [ -f ~/.upterm_link ]; then
+    . ~/.upterm_link
+    echo "SSH Command: $UPTERM_SSH"
+    echo "Web Link:    $UPTERM_WEB"
+  elif [ -f /tmp/upterm_ssh ]; then
+    echo "SSH Command: $(cat /tmp/upterm_ssh)"
+    echo "Web Link:    $(cat /tmp/upterm_web)"
   else
-    echo "No sshx link available yet"
+    echo "No upterm info available yet"
   fi
 }
 BASHRC
@@ -130,7 +132,7 @@ BASHRC
           # Also set up zshrc and profile
           cat > ~/.zshrc << 'ZSHRC'
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
-[ -f ~/.sshx_link ] && . ~/.sshx_link
+[ -f ~/.upterm_link ] && . ~/.upterm_link
 
 if [[ -o interactive ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   export STARTUP_INFO_SHOWN=1
@@ -141,26 +143,28 @@ if [[ -o interactive ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   done
   if [ -f /tmp/startup_info ]; then
     cat /tmp/startup_info
-    [ -f ~/.sshx_link ] && . ~/.sshx_link
+    [ -f ~/.upterm_link ] && . ~/.upterm_link
   fi
   unset _wait_count
 fi
 
-get_sshx_link() {
-  if [ -f ~/.sshx_link ]; then
-    . ~/.sshx_link
-    echo "$SSHX_LINK"
-  elif [ -f /tmp/sshx_link ]; then
-    cat /tmp/sshx_link
+get_upterm_info() {
+  if [ -f ~/.upterm_link ]; then
+    . ~/.upterm_link
+    echo "SSH Command: $UPTERM_SSH"
+    echo "Web Link:    $UPTERM_WEB"
+  elif [ -f /tmp/upterm_ssh ]; then
+    echo "SSH Command: $(cat /tmp/upterm_ssh)"
+    echo "Web Link:    $(cat /tmp/upterm_web)"
   else
-    echo "No sshx link available yet"
+    echo "No upterm info available yet"
   fi
 }
 ZSHRC
 
           cat > ~/.profile << 'PROFILE'
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
-[ -f ~/.sshx_link ] && . ~/.sshx_link
+[ -f ~/.upterm_link ] && . ~/.upterm_link
 PROFILE
 
           cat > ~/.screenrc << 'SCREENRC'
@@ -177,7 +181,12 @@ SCREENRC
           sleep 1
 
           # Clear old files
-          rm -f /tmp/sshx_link /tmp/sshx_output /tmp/startup_info /tmp/startup_complete
+          rm -f /tmp/upterm_ssh /tmp/upterm_web /tmp/upterm_output /tmp/startup_info /tmp/startup_complete
+
+          # Generate SSH host key if not exists
+          mkdir -p ~/.ssh
+          [ ! -f ~/.ssh/id_rsa ] && ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa -N "" -q
+          [ ! -f ~/.ssh/authorized_keys ] && cat ~/.ssh/id_rsa.pub > ~/.ssh/authorized_keys
 
           # Create screen session starter scripts
           cat > /tmp/start_stayawake.sh << 'STAYAWAKE_SCRIPT'
@@ -220,37 +229,52 @@ done
 STAYAWAKE_SCRIPT
           chmod +x /tmp/start_stayawake.sh
 
-          cat > /tmp/start_sshx.sh << 'SSHX_SCRIPT'
+          cat > /tmp/start_upterm.sh << 'UPTERM_SCRIPT'
 #!/bin/bash
 source ~/.shell-fixes 2>/dev/null
 RESTART_COUNT=0
 
-update_sshx_link() {
-  local new_link="$1"
-  echo "$new_link" > /tmp/sshx_link
-  echo "export SSHX_LINK=\"$new_link\"" > ~/.sshx_link
+update_upterm_info() {
+  local ssh_cmd="$1"
+  local web_link="$2"
+  
+  echo "$ssh_cmd" > /tmp/upterm_ssh
+  echo "$web_link" > /tmp/upterm_web
+  
+  cat > ~/.upterm_link << LINKEND
+export UPTERM_SSH="$ssh_cmd"
+export UPTERM_WEB="$web_link"
+LINKEND
 
   cat > /tmp/startup_info << INFOEND
 
 ==========================================
 STARTUP COMPLETE
-SSHX Link: $new_link
 (Updated at: $(date))
 
+==========================================
+UPTERM CONNECTION INFO
+==========================================
+SSH Command:
+  $ssh_cmd
+
+Web Terminal:
+  $web_link
+==========================================
+
 Screen Sessions:
-$(screen -ls 2>/dev/null | grep -E "stayawake|sshx|VPS|watchdog" || echo "  Loading...")
+$(screen -ls 2>/dev/null | grep -E "stayawake|upterm|VPS|watchdog" || echo "  Loading...")
 
 Commands:
   screen -r stayawake  - View keep-alive script
-  screen -r sshx       - View sshx session
+  screen -r upterm     - View upterm session
   screen -r VPS        - View VPS/idxtool session
   screen -r watchdog   - View session watchdog
 
 Detach from screen: Ctrl+A then D
 Restart script: Ctrl+C (script restarts, screen stays)
-Get sshx link: echo \$SSHX_LINK
-              get_sshx_link
-              cat ~/.sshx_link
+Get upterm info: get_upterm_info
+                 cat ~/.upterm_link
 
 ==========================================
 INFOEND
@@ -260,69 +284,113 @@ while true; do
   RESTART_COUNT=$((RESTART_COUNT + 1))
   echo ""
   echo "=========================================="
-  echo " SSHX SESSION - Run #$RESTART_COUNT"
+  echo " UPTERM SESSION - Run #$RESTART_COUNT"
   echo " Started at: $(date)"
   echo " Press Ctrl+C to restart script"
   echo " Press Ctrl+A then D to detach"
   echo "=========================================="
   echo ""
 
-  rm -f /tmp/sshx_output
+  rm -f /tmp/upterm_output
 
+  # Start upterm in background and capture output
   (
     trap "exit 130" INT
-    sshx 2>&1 | tee /tmp/sshx_output
+    upterm host --accept -- bash 2>&1 | tee /tmp/upterm_output
   ) &
-  SSHX_PID=$!
+  UPTERM_PID=$!
 
   LINK_FOUND=0
-  for i in $(seq 1 30); do
-    if ! kill -0 $SSHX_PID 2>/dev/null; then
+  for i in $(seq 1 60); do
+    if ! kill -0 $UPTERM_PID 2>/dev/null; then
       break
     fi
-    if grep -o "https://sshx.io/s/[^#]*#[^ ]*" /tmp/sshx_output > /tmp/sshx_link_new 2>/dev/null; then
-      NEW_LINK=$(cat /tmp/sshx_link_new | head -1)
-      if [ -n "$NEW_LINK" ]; then
-        update_sshx_link "$NEW_LINK"
+    
+    # Try to get session info using upterm session current
+    SESSION_INFO=$(upterm session current 2>/dev/null)
+    
+    if [ -n "$SESSION_INFO" ]; then
+      SSH_CMD=$(echo "$SESSION_INFO" | grep -E "^SSH Session:" | sed 's/SSH Session:[[:space:]]*//')
+      WEB_LINK=$(echo "$SESSION_INFO" | grep -E "^Web Terminal:" | sed 's/Web Terminal:[[:space:]]*//')
+      
+      if [ -n "$SSH_CMD" ] && [ -n "$WEB_LINK" ]; then
+        update_upterm_info "$SSH_CMD" "$WEB_LINK"
         echo ""
         echo "=========================================="
-        echo " NEW SSHX LINK CAPTURED!"
-        echo " $NEW_LINK"
+        echo " UPTERM SESSION READY!"
+        echo ""
+        echo " SSH Command:"
+        echo "   $SSH_CMD"
+        echo ""
+        echo " Web Terminal:"
+        echo "   $WEB_LINK"
         echo "=========================================="
         echo ""
         LINK_FOUND=1
         break
       fi
     fi
+    
+    # Alternative: parse from output file
+    if [ -f /tmp/upterm_output ]; then
+      SSH_CMD=$(grep -oP "(?<=SSH Session:)[^\n]+" /tmp/upterm_output 2>/dev/null | head -1 | xargs)
+      WEB_LINK=$(grep -oP "(?<=Web Terminal:)[^\n]+" /tmp/upterm_output 2>/dev/null | head -1 | xargs)
+      
+      if [ -z "$SSH_CMD" ]; then
+        SSH_CMD=$(grep -oE "ssh [^ ]+@[^ ]+" /tmp/upterm_output 2>/dev/null | head -1)
+      fi
+      if [ -z "$WEB_LINK" ]; then
+        WEB_LINK=$(grep -oE "https://upterm\.(dev|io)/[^ ]+" /tmp/upterm_output 2>/dev/null | head -1)
+      fi
+      
+      if [ -n "$SSH_CMD" ] && [ -n "$WEB_LINK" ]; then
+        update_upterm_info "$SSH_CMD" "$WEB_LINK"
+        echo ""
+        echo "=========================================="
+        echo " UPTERM SESSION READY!"
+        echo ""
+        echo " SSH Command:"
+        echo "   $SSH_CMD"
+        echo ""
+        echo " Web Terminal:"
+        echo "   $WEB_LINK"
+        echo "=========================================="
+        echo ""
+        LINK_FOUND=1
+        break
+      fi
+    fi
+    
     sleep 1
   done
 
   if [ $LINK_FOUND -eq 0 ]; then
-    echo "WARNING: Could not capture sshx link within 30 seconds"
+    echo "WARNING: Could not capture upterm info within 60 seconds"
+    echo "Check 'upterm session current' manually"
   fi
 
-  wait $SSHX_PID 2>/dev/null
+  wait $UPTERM_PID 2>/dev/null
   EXIT_CODE=$?
 
   if [ $EXIT_CODE -eq 130 ]; then
     echo ""
     echo "=========================================="
-    echo " sshx interrupted (Ctrl+C)"
+    echo " upterm interrupted (Ctrl+C)"
     echo " Restarting in 3 seconds..."
-    echo " A NEW LINK will be generated!"
+    echo " NEW session will be created!"
     echo "=========================================="
   else
     echo ""
     echo "=========================================="
-    echo " sshx exited with code: $EXIT_CODE"
+    echo " upterm exited with code: $EXIT_CODE"
     echo " Restarting in 3 seconds..."
-    echo " A NEW LINK will be generated!"
+    echo " NEW session will be created!"
     echo "=========================================="
   fi
   sleep 3
 done
-SSHX_SCRIPT
-          chmod +x /tmp/start_sshx.sh
+UPTERM_SCRIPT
+          chmod +x /tmp/start_upterm.sh
 
           cat > /tmp/start_vps.sh << 'VPS_SCRIPT'
 #!/bin/bash
@@ -372,7 +440,7 @@ source ~/.shell-fixes 2>/dev/null
 echo "=========================================="
 echo " SCREEN SESSION WATCHDOG"
 echo " Started at: $(date)"
-echo " Monitoring: stayawake, sshx, VPS"
+echo " Monitoring: stayawake, upterm, VPS"
 echo " Check interval: 10 seconds"
 echo "=========================================="
 echo ""
@@ -395,7 +463,7 @@ check_and_start_session() {
 
 while true; do
   check_and_start_session "stayawake" "/tmp/start_stayawake.sh"
-  check_and_start_session "sshx" "/tmp/start_sshx.sh"
+  check_and_start_session "upterm" "/tmp/start_upterm.sh"
   check_and_start_session "VPS" "/tmp/start_vps.sh"
 
   screen -wipe 2>/dev/null || true
@@ -408,8 +476,8 @@ WATCHDOG_SCRIPT
           # 1. Start stayawake session
           screen -dmS stayawake bash /tmp/start_stayawake.sh
 
-          # 2. Start sshx session
-          screen -dmS sshx bash /tmp/start_sshx.sh
+          # 2. Start upterm session
+          screen -dmS upterm bash /tmp/start_upterm.sh
 
           # 3. Start VPS session
           screen -dmS VPS bash /tmp/start_vps.sh
@@ -417,12 +485,17 @@ WATCHDOG_SCRIPT
           # 4. Start watchdog session (monitors and restarts other sessions)
           screen -dmS watchdog bash /tmp/watchdog.sh
 
-          # Wait for sshx link
-          SSHX_LINK=""
-          for i in $(seq 1 60); do
-            if [ -s /tmp/sshx_link ]; then
-              SSHX_LINK=$(cat /tmp/sshx_link | head -1)
-              echo "export SSHX_LINK=\"$SSHX_LINK\"" > ~/.sshx_link
+          # Wait for upterm info
+          UPTERM_SSH=""
+          UPTERM_WEB=""
+          for i in $(seq 1 90); do
+            if [ -s /tmp/upterm_ssh ] && [ -s /tmp/upterm_web ]; then
+              UPTERM_SSH=$(cat /tmp/upterm_ssh | head -1)
+              UPTERM_WEB=$(cat /tmp/upterm_web | head -1)
+              cat > ~/.upterm_link << LINKEND
+export UPTERM_SSH="$UPTERM_SSH"
+export UPTERM_WEB="$UPTERM_WEB"
+LINKEND
               break
             fi
             sleep 1
@@ -432,26 +505,35 @@ WATCHDOG_SCRIPT
           cat > /tmp/startup_info << INFOEND
 ==========================================
 STARTUP COMPLETE
-SSHX Link: ''${SSHX_LINK:-"Loading... run: cat /tmp/sshx_link"}
+(Updated at: $(date))
+
+==========================================
+UPTERM CONNECTION INFO
+==========================================
+SSH Command:
+  ''${UPTERM_SSH:-"Loading... run: cat /tmp/upterm_ssh"}
+
+Web Terminal:
+  ''${UPTERM_WEB:-"Loading... run: cat /tmp/upterm_web"}
+==========================================
 
 Screen Sessions:
-$(screen -ls 2>/dev/null | grep -E "stayawake|sshx|VPS|watchdog" || echo "  Loading...")
+$(screen -ls 2>/dev/null | grep -E "stayawake|upterm|VPS|watchdog" || echo "  Loading...")
 
 Commands:
   screen -r stayawake  - View keep-alive script
-  screen -r sshx       - View sshx session
+  screen -r upterm     - View upterm session
   screen -r VPS        - View VPS/idxtool session
   screen -r watchdog   - View session watchdog
 
 Detach from screen: Ctrl+A then D
 Restart script: Ctrl+C (script restarts, screen stays)
-Get sshx link: echo \$SSHX_LINK
-              get_sshx_link
-              cat ~/.sshx_link
+Get upterm info: get_upterm_info
+                 cat ~/.upterm_link
 
 NOTE: All scripts auto-restart after 3 seconds if they exit.
       Ctrl+C restarts the script, NOT the screen session.
-      If sshx restarts, a NEW link will be generated.
+      If upterm restarts, NEW connection info will be generated.
       WATCHDOG monitors sessions every 10 seconds and
       auto-restarts any deleted screen sessions.
 
