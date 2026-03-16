@@ -7,8 +7,8 @@
     cloud-utils
     qemu_kvm
     qemu
-    sshx
-    screen
+    tmate
+    tmux
     openssh
     unzip
     git
@@ -26,10 +26,8 @@
     workspace = {
       onStart = {
         startup = ''
-          # Clean up screens first
-          screen -wipe 2>/dev/null || true
-          killall screen 2>/dev/null || true
-          screen -wipe 2>/dev/null || true
+          # Clean up tmux first
+          tmux kill-server 2>/dev/null || true
 
           # Create shell-fixes
           cat > ~/.shell-fixes << 'NIXFIX'
@@ -79,9 +77,9 @@ fi
 
 [ ! -d "''${HOME:-}" ] && export HOME=$(eval echo "~$(whoami)")
 
-[ -n "$STY" ] && export SHELL="''${SHELL:-/bin/bash}"
+[ -n "$TMUX" ] && export SHELL="''${SHELL:-/bin/bash}"
 
-[ -f ~/.sshx_link ] && . ~/.sshx_link
+[ -f ~/.tmate_link ] && . ~/.tmate_link
 
 true
 NIXFIX
@@ -91,12 +89,8 @@ NIXFIX
 # Source shell fixes
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
 
-# Source sshx link
-[ -f ~/.sshx_link ] && . ~/.sshx_link
-
-# Disable terminal scroll mode for proper screen scrollback
-bind '"\e[5~": ""' 2>/dev/null   # Disable Page Up for history
-bind '"\e[6~": ""' 2>/dev/null   # Disable Page Down for history
+# Source tmate link
+[ -f ~/.tmate_link ] && . ~/.tmate_link
 
 # Auto-display startup info (only once per session, only in interactive shell)
 if [[ $- == *i* ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
@@ -112,21 +106,22 @@ if [[ $- == *i* ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   # Show the info
   if [ -f /tmp/startup_info ]; then
     cat /tmp/startup_info
-    # Reload sshx link in case it was updated
-    [ -f ~/.sshx_link ] && . ~/.sshx_link
+    # Reload tmate link in case it was updated
+    [ -f ~/.tmate_link ] && . ~/.tmate_link
   fi
   unset _wait_count
 fi
 
-# Function to get current sshx link
-get_sshx_link() {
-  if [ -f ~/.sshx_link ]; then
-    . ~/.sshx_link
-    echo "$SSHX_LINK"
-  elif [ -f /tmp/sshx_link ]; then
-    cat /tmp/sshx_link
+# Function to get current tmate links
+get_tmate_link() {
+  if [ -f ~/.tmate_link ]; then
+    . ~/.tmate_link
+    echo ""
+    echo "  Connect via terminal:  $TMATE_SSH"
+    echo "  Connect via browser:   $TMATE_WEB"
+    echo ""
   else
-    echo "No sshx link available yet"
+    echo "No tmate link available yet"
   fi
 }
 BASHRC
@@ -134,7 +129,7 @@ BASHRC
           # Also set up zshrc and profile
           cat > ~/.zshrc << 'ZSHRC'
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
-[ -f ~/.sshx_link ] && . ~/.sshx_link
+[ -f ~/.tmate_link ] && . ~/.tmate_link
 
 if [[ -o interactive ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   export STARTUP_INFO_SHOWN=1
@@ -145,66 +140,34 @@ if [[ -o interactive ]] && [ -z "$STARTUP_INFO_SHOWN" ]; then
   done
   if [ -f /tmp/startup_info ]; then
     cat /tmp/startup_info
-    [ -f ~/.sshx_link ] && . ~/.sshx_link
+    [ -f ~/.tmate_link ] && . ~/.tmate_link
   fi
   unset _wait_count
 fi
 
-get_sshx_link() {
-  if [ -f ~/.sshx_link ]; then
-    . ~/.sshx_link
-    echo "$SSHX_LINK"
-  elif [ -f /tmp/sshx_link ]; then
-    cat /tmp/sshx_link
+get_tmate_link() {
+  if [ -f ~/.tmate_link ]; then
+    . ~/.tmate_link
+    echo ""
+    echo "  Connect via terminal:  $TMATE_SSH"
+    echo "  Connect via browser:   $TMATE_WEB"
+    echo ""
   else
-    echo "No sshx link available yet"
+    echo "No tmate link available yet"
   fi
 }
 ZSHRC
 
           cat > ~/.profile << 'PROFILE'
 [ -f ~/.shell-fixes ] && . ~/.shell-fixes
-[ -f ~/.sshx_link ] && . ~/.sshx_link
+[ -f ~/.tmate_link ] && . ~/.tmate_link
 PROFILE
 
-          # Enhanced screenrc with scrollback support
-          cat > ~/.screenrc << 'SCREENRC'
-# Terminal settings
-setenv TMPDIR /tmp
-term xterm-256color
-startup_message off
-
-# Scrollback buffer - 50000 lines
-defscrollback 50000
-
-# Enable mouse scrolling and terminal scrollback
-termcapinfo xterm* ti@:te@
-
-# Alternative scrollback for other terminals
-termcapinfo rxvt* ti@:te@
-termcapinfo vt100 dl=5\E[M
-
-# Shell settings
-shell -$SHELL
-
-# Status line
-hardstatus alwayslastline
-hardstatus string '%{= kG}[ %{G}%H %{g}][%= %{= kw}%?%-Lw%?%{r}(%{W}%n*%f%t%?(%u)%?%{r})%{w}%?%+Lw%?%?%= %{g}][%{B} %m-%d %{W}%c %{g}]'
-
-# Key bindings for scrollback
-# Enter copy/scrollback mode with Ctrl+A then Escape
-# Then use Page Up/Down, arrow keys, or mouse wheel to scroll
-# Press Escape or q to exit scrollback mode
-
-# Enable UTF-8
-defutf8 on
-
-# Visual bell instead of audio
-vbell on
-
-# Don't block when a window hangs
-nonblock on
-SCREENRC
+          cat > ~/.tmux.conf << 'TMUXCONF'
+set-option -g default-terminal "xterm-256color"
+set-option -g history-limit 10000
+set-option -g default-shell /bin/bash
+TMUXCONF
 
           export TMPDIR=/tmp
           [ -f ~/.shell-fixes ] && . ~/.shell-fixes
@@ -212,9 +175,9 @@ SCREENRC
           sleep 1
 
           # Clear old files
-          rm -f /tmp/sshx_link /tmp/sshx_output /tmp/startup_info /tmp/startup_complete
+          rm -f /tmp/tmate_link /tmp/tmate.sock /tmp/startup_info /tmp/startup_complete
 
-          # Create screen session starter scripts
+          # Create tmux session starter scripts
           cat > /tmp/start_stayawake.sh << 'STAYAWAKE_SCRIPT'
 #!/bin/bash
 source ~/.shell-fixes 2>/dev/null
@@ -227,7 +190,7 @@ while true; do
   echo "  STAYAWAKE SCRIPT - Run #$RESTART_COUNT"
   echo "  Started at: $(date)"
   echo "  Press Ctrl+C to restart script"
-  echo "  Press Ctrl+A then D to detach"
+  echo "  Press Ctrl+B then D to detach"
   echo "=========================================="
   echo ""
   
@@ -255,15 +218,23 @@ done
 STAYAWAKE_SCRIPT
           chmod +x /tmp/start_stayawake.sh
 
-          cat > /tmp/start_sshx.sh << 'SSHX_SCRIPT'
+          cat > /tmp/start_tmate.sh << 'TMATE_SCRIPT'
 #!/bin/bash
 source ~/.shell-fixes 2>/dev/null
 RESTART_COUNT=0
 
-update_sshx_link() {
-  local new_link="$1"
-  echo "$new_link" > /tmp/sshx_link
-  echo "export SSHX_LINK=\"$new_link\"" > ~/.sshx_link
+update_tmate_link() {
+  local web="$1"
+  local ssh="$2"
+  local web_ro="$3"
+  local ssh_ro="$4"
+
+  cat > ~/.tmate_link << LINKEND
+export TMATE_WEB="$web"
+export TMATE_SSH="$ssh"
+export TMATE_WEB_RO="$web_ro"
+export TMATE_SSH_RO="$ssh_ro"
+LINKEND
   
   cat > /tmp/startup_info << INFOEND
 
@@ -271,29 +242,33 @@ update_sshx_link() {
         STARTUP COMPLETE
 ==========================================
 
-SSHX Link: $new_link
-(Updated at: $(date))
+  Connect via terminal:
+    $ssh
 
-Screen Sessions:
-$(screen -ls 2>/dev/null | grep -E "stayawake|sshx|VPS|watchdog" || echo "  Loading...")
+  Connect via browser:
+    $web
+
+  (Updated at: $(date))
+
+------------------------------------------
+
+tmux Sessions:
+$(tmux list-sessions 2>/dev/null || echo "  Loading...")
 
 Commands:
-  screen -r stayawake  - View keep-alive script
-  screen -r sshx       - View sshx session
-  screen -r VPS        - View VPS/idxtool session
-  screen -r watchdog   - View session watchdog
+  tmux attach -t stayawake  - View keep-alive script
+  tmux attach -t tmate_mgr  - View tmate manager
+  tmux attach -t VPS        - View VPS/idxtool session
+  tmux attach -t watchdog   - View session watchdog
   
-  Detach from screen:  Ctrl+A then D
-  Restart script:      Ctrl+C (script restarts, screen stays)
-  Get sshx link:       echo \$SSHX_LINK
-                       get_sshx_link
-                       cat ~/.sshx_link
+  Detach from tmux:    Ctrl+B then D
+  Restart script:      Ctrl+C (script restarts, tmux stays)
+  Get tmate links:     get_tmate_link
 
-SCROLL IN SCREEN:
-  Ctrl+A then Escape   - Enter scrollback mode
-  Page Up/Down         - Scroll through history
-  Arrow keys           - Navigate
-  Escape or q          - Exit scrollback mode
+NOTE: All scripts auto-restart after 3 seconds if they exit.
+      If tmate restarts, NEW links will be generated.
+      WATCHDOG monitors sessions every 10 seconds and
+      auto-restarts any dead tmux sessions.
 
 ==========================================
 INFOEND
@@ -303,69 +278,58 @@ while true; do
   RESTART_COUNT=$((RESTART_COUNT + 1))
   echo ""
   echo "=========================================="
-  echo "  SSHX SESSION - Run #$RESTART_COUNT"
+  echo "  TMATE SESSION - Run #$RESTART_COUNT"
   echo "  Started at: $(date)"
-  echo "  Press Ctrl+C to restart script"
-  echo "  Press Ctrl+A then D to detach"
+  echo "  Press Ctrl+C to restart"
+  echo "  Press Ctrl+B then D to detach"
   echo "=========================================="
   echo ""
   
-  rm -f /tmp/sshx_output
+  rm -f /tmp/tmate.sock
+
+  # Start tmate in detached mode with a named socket
+  tmate -S /tmp/tmate.sock new-session -d
   
-  (
-    trap "exit 130" INT
-    sshx 2>&1 | tee /tmp/sshx_output
-  ) &
-  SSHX_PID=$!
-  
-  LINK_FOUND=0
-  for i in $(seq 1 30); do
-    if ! kill -0 $SSHX_PID 2>/dev/null; then
-      break
-    fi
-    if grep -o "https://sshx.io/s/[^#]*#[^ ]*" /tmp/sshx_output > /tmp/sshx_link_new 2>/dev/null; then
-      NEW_LINK=$(cat /tmp/sshx_link_new | head -1)
-      if [ -n "$NEW_LINK" ]; then
-        update_sshx_link "$NEW_LINK"
-        echo ""
-        echo "=========================================="
-        echo "  NEW SSHX LINK CAPTURED!"
-        echo "  $NEW_LINK"
-        echo "=========================================="
-        echo ""
-        LINK_FOUND=1
-        break
-      fi
-    fi
-    sleep 1
-  done
-  
-  if [ $LINK_FOUND -eq 0 ]; then
-    echo "WARNING: Could not capture sshx link within 30 seconds"
-  fi
-  
-  wait $SSHX_PID 2>/dev/null
-  EXIT_CODE=$?
-  
-  if [ $EXIT_CODE -eq 130 ]; then
+  # Wait for tmate to be ready
+  tmate -S /tmp/tmate.sock wait tmate-ready
+
+  # Capture all 4 links
+  TMATE_WEB=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web}')
+  TMATE_SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+  TMATE_WEB_RO=$(tmate -S /tmp/tmate.sock display -p '#{tmate_web_ro}')
+  TMATE_SSH_RO=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh_ro}')
+
+  if [ -n "$TMATE_WEB" ]; then
+    update_tmate_link "$TMATE_WEB" "$TMATE_SSH" "$TMATE_WEB_RO" "$TMATE_SSH_RO"
     echo ""
     echo "=========================================="
-    echo "  sshx interrupted (Ctrl+C)"
-    echo "  Restarting in 3 seconds..."
-    echo "  A NEW LINK will be generated!"
+    echo "  TMATE LINKS CAPTURED!"
+    echo ""
+    echo "  Connect via terminal:"
+    echo "    $TMATE_SSH"
+    echo ""
+    echo "  Connect via browser:"
+    echo "    $TMATE_WEB"
     echo "=========================================="
+    echo ""
   else
-    echo ""
-    echo "=========================================="
-    echo "  sshx exited with code: $EXIT_CODE"
-    echo "  Restarting in 3 seconds..."
-    echo "  A NEW LINK will be generated!"
-    echo "=========================================="
+    echo "WARNING: Could not capture tmate links"
   fi
+
+  # Wait for the tmate session to end
+  tmate -S /tmp/tmate.sock wait tmate-session-deactivated 2>/dev/null
+  EXIT_CODE=$?
+
+  echo ""
+  echo "=========================================="
+  echo "  tmate session ended (code: $EXIT_CODE)"
+  echo "  Restarting in 3 seconds..."
+  echo "  NEW LINKS will be generated!"
+  echo "=========================================="
   sleep 3
 done
-SSHX_SCRIPT
-          chmod +x /tmp/start_sshx.sh
+TMATE_SCRIPT
+          chmod +x /tmp/start_tmate.sh
 
           cat > /tmp/start_vps.sh << 'VPS_SCRIPT'
 #!/bin/bash
@@ -379,7 +343,7 @@ while true; do
   echo "  VPS/IDXTOOL SCRIPT - Run #$RESTART_COUNT"
   echo "  Started at: $(date)"
   echo "  Press Ctrl+C to restart script"
-  echo "  Press Ctrl+A then D to detach"
+  echo "  Press Ctrl+B then D to detach"
   echo "=========================================="
   echo ""
   
@@ -413,9 +377,9 @@ VPS_SCRIPT
 source ~/.shell-fixes 2>/dev/null
 
 echo "=========================================="
-echo "  SCREEN SESSION WATCHDOG"
+echo "  TMUX SESSION WATCHDOG"
 echo "  Started at: $(date)"
-echo "  Monitoring: stayawake, sshx, VPS"
+echo "  Monitoring: stayawake, tmate_mgr, VPS"
 echo "  Check interval: 10 seconds"
 echo "=========================================="
 echo ""
@@ -424,11 +388,11 @@ check_and_start_session() {
   local session_name="$1"
   local script_path="$2"
   
-  if ! screen -ls | grep -q "\.$session_name[[:space:]]"; then
+  if ! tmux has-session -t "$session_name" 2>/dev/null; then
     echo "[$(date '+%H:%M:%S')] Session '$session_name' not found - RESTARTING..."
-    screen -dmS "$session_name" bash "$script_path"
+    tmux new-session -d -s "$session_name" "bash $script_path"
     sleep 2
-    if screen -ls | grep -q "\.$session_name[[:space:]]"; then
+    if tmux has-session -t "$session_name" 2>/dev/null; then
       echo "[$(date '+%H:%M:%S')] Session '$session_name' successfully restarted!"
     else
       echo "[$(date '+%H:%M:%S')] WARNING: Failed to restart '$session_name'"
@@ -438,10 +402,8 @@ check_and_start_session() {
 
 while true; do
   check_and_start_session "stayawake" "/tmp/start_stayawake.sh"
-  check_and_start_session "sshx" "/tmp/start_sshx.sh"
+  check_and_start_session "tmate_mgr" "/tmp/start_tmate.sh"
   check_and_start_session "VPS" "/tmp/start_vps.sh"
-  
-  screen -wipe 2>/dev/null || true
   
   sleep 10
 done
@@ -449,63 +411,59 @@ WATCHDOG_SCRIPT
           chmod +x /tmp/watchdog.sh
 
           # 1. Start stayawake session
-          screen -dmS stayawake bash /tmp/start_stayawake.sh
+          tmux new-session -d -s stayawake "bash /tmp/start_stayawake.sh"
 
-          # 2. Start sshx session
-          screen -dmS sshx bash /tmp/start_sshx.sh
+          # 2. Start tmate manager session
+          tmux new-session -d -s tmate_mgr "bash /tmp/start_tmate.sh"
 
           # 3. Start VPS session
-          screen -dmS VPS bash /tmp/start_vps.sh
+          tmux new-session -d -s VPS "bash /tmp/start_vps.sh"
 
           # 4. Start watchdog session (monitors and restarts other sessions)
-          screen -dmS watchdog bash /tmp/watchdog.sh
+          tmux new-session -d -s watchdog "bash /tmp/watchdog.sh"
 
-          # Wait for sshx link
-          SSHX_LINK=""
+          # Wait for tmate links
           for i in $(seq 1 60); do
-            if [ -s /tmp/sshx_link ]; then
-              SSHX_LINK=$(cat /tmp/sshx_link | head -1)
-              echo "export SSHX_LINK=\"$SSHX_LINK\"" > ~/.sshx_link
+            if [ -f ~/.tmate_link ]; then
+              . ~/.tmate_link
               break
             fi
             sleep 1
           done
 
           # Build startup info file
+          [ -f ~/.tmate_link ] && . ~/.tmate_link
           cat > /tmp/startup_info << INFOEND
 
 ==========================================
         STARTUP COMPLETE
 ==========================================
 
-SSHX Link: ''${SSHX_LINK:-"Loading... run: cat /tmp/sshx_link"}
+  Connect via terminal:
+    ''${TMATE_SSH:-"Loading... run: get_tmate_link"}
 
-Screen Sessions:
-$(screen -ls 2>/dev/null | grep -E "stayawake|sshx|VPS|watchdog" || echo "  Loading...")
+  Connect via browser:
+    ''${TMATE_WEB:-"Loading... run: get_tmate_link"}
+
+------------------------------------------
+
+tmux Sessions:
+$(tmux list-sessions 2>/dev/null || echo "  Loading...")
 
 Commands:
-  screen -r stayawake  - View keep-alive script
-  screen -r sshx       - View sshx session
-  screen -r VPS        - View VPS/idxtool session
-  screen -r watchdog   - View session watchdog
+  tmux attach -t stayawake  - View keep-alive script
+  tmux attach -t tmate_mgr  - View tmate manager
+  tmux attach -t VPS        - View VPS/idxtool session
+  tmux attach -t watchdog   - View session watchdog
   
-  Detach from screen:  Ctrl+A then D
-  Restart script:      Ctrl+C (script restarts, screen stays)
-  Get sshx link:       echo \$SSHX_LINK
-                       get_sshx_link
-                       cat ~/.sshx_link
-
-SCROLL IN SCREEN:
-  Ctrl+A then Escape   - Enter scrollback mode
-  Page Up/Down         - Scroll through history
-  Arrow keys           - Navigate
-  Escape or q          - Exit scrollback mode
+  Detach from tmux:    Ctrl+B then D
+  Restart script:      Ctrl+C (script restarts, tmux stays)
+  Get tmate links:     get_tmate_link
 
 NOTE: All scripts auto-restart after 3 seconds if they exit.
-      Ctrl+C restarts the script, NOT the screen session.
-      If sshx restarts, a NEW link will be generated.
+      If tmate restarts, NEW links will be generated.
       WATCHDOG monitors sessions every 10 seconds and
-      auto-restarts any deleted screen sessions.
+      auto-restarts any dead tmux sessions.
 
 ==========================================
 INFOEND
@@ -531,3 +489,4 @@ INFOEND
       };
     };
   };
+}
